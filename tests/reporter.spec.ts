@@ -105,4 +105,61 @@ test('REPORTER-02: a real pass', () => {});
     expect(blocksText).toContain('1 failed');
     expect(blocksText).toContain('1 passed');
   });
+
+  test('a GitHub Actions environment adds a build link with no `build` option configured', async ({
+    slack,
+  }) => {
+    slack.respondWith({ status: 200, body: 'ok' });
+
+    // A separate scratch dir from the test above - both tests can run
+    // concurrently under fullyParallel, and sharing one dir would race.
+    const scratchDir = path.join(REPORTS_DIR, 'reporter-scratch-ci-build');
+    rmSync(scratchDir, { recursive: true, force: true });
+    mkdirSync(path.join(scratchDir, 'specs'), { recursive: true });
+
+    writeFileSync(
+      path.join(scratchDir, 'playwright.config.mjs'),
+      `export default {
+  testDir: './specs',
+  reporter: [['${DIST_REPORTER}', { webhookUrl: '${slack.url}', sendResults: 'always' }]],
+};\n`
+    );
+    writeFileSync(
+      path.join(scratchDir, 'specs', 'basic.spec.mjs'),
+      `import { test } from '@playwright/test';
+test('CIBUILD-01: a real failure', () => {
+  throw new Error('deliberate failure');
+});
+`
+    );
+
+    // Only these keys need overriding - the rest of process.env passes
+    // through unchanged, same as the test above.
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      GITHUB_ACTIONS: 'true',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'acme/widgets',
+      GITHUB_RUN_ID: '4200',
+      GITHUB_RUN_NUMBER: '42',
+      GITHUB_WORKFLOW: 'CI',
+      GITHUB_ACTOR: 'hoang',
+      GITHUB_SHA: 'deadbeef',
+    };
+
+    try {
+      await execFileAsync(process.execPath, [PLAYWRIGHT_CLI, 'test'], {
+        cwd: scratchDir,
+        env,
+      });
+    } catch {
+      // Expected - the scratch project's one test deliberately fails.
+    }
+
+    expect(slack.requests).toHaveLength(1);
+    const blocksText = JSON.stringify(slack.requests[0].body);
+    expect(blocksText).toContain(
+      'https://github.com/acme/widgets/actions/runs/4200'
+    );
+  });
 });

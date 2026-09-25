@@ -38,7 +38,10 @@ export interface TestOutcome {
   readonly status?: string;
 }
 
-/** Where a build came from and how to link back to it. */
+/** Where a build came from and how to link back to it. The reporter and
+ *  CLI surfaces fill this in automatically under GitHub Actions or Jenkins
+ *  (see ci.ts's detectBuildContext) - a caller only needs to set fields
+ *  here that can't be detected, like `reportUrl`, or to override one. */
 export interface BuildContext {
   /** e.g. 'main-develop-26505'. */
   readonly job?: string;
