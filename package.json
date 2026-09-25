@@ -81,7 +81,7 @@
     "*.{ts,js}": "eslint --cache --fix"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.5.0",
+    "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^9.39.2",
     "@playwright/test": "^1.63.0",
