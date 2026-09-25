@@ -49,3 +49,5 @@ export {
 } from './adapt.js';
 
 export { summaryFromReport, type RawPlaywrightReport } from './report.js';
+
+export { detectBuildContext, mergeBuildContext } from './ci.js';

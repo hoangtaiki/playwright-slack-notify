@@ -179,6 +179,51 @@ test.describe('cli - a real post via --webhook', () => {
   });
 });
 
+test.describe('cli - CI auto-detected build link', () => {
+  test('a GitHub Actions environment adds a build link to the payload with zero config', async () => {
+    const keys = [
+      'GITHUB_ACTIONS',
+      'GITHUB_SERVER_URL',
+      'GITHUB_REPOSITORY',
+      'GITHUB_RUN_ID',
+      'GITHUB_RUN_NUMBER',
+      'GITHUB_WORKFLOW',
+      'GITHUB_ACTOR',
+      'GITHUB_SHA',
+    ] as const;
+    // Snapshot and restore rather than delete-on-cleanup: this suite may
+    // itself be running under real GitHub Actions, where these are already
+    // set to real values that must come back afterward.
+    const original = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+    Object.assign(process.env, {
+      GITHUB_ACTIONS: 'true',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'acme/widgets',
+      GITHUB_RUN_ID: '999',
+      GITHUB_RUN_NUMBER: '7',
+      GITHUB_WORKFLOW: 'CI',
+      GITHUB_ACTOR: 'hoang',
+      GITHUB_SHA: 'cafef00d',
+    });
+    const cap = captureConsole();
+    let code: number;
+    try {
+      code = await run([RAW_REPORT_PATH, '--dry-run']);
+    } finally {
+      cap.restore();
+      for (const k of keys) {
+        if (original[k] === undefined) delete process.env[k];
+        else process.env[k] = original[k];
+      }
+    }
+    expect(code).toBe(0);
+    const result = JSON.parse(cap.out.join(''));
+    expect(JSON.stringify(result.payload)).toContain(
+      'https://github.com/acme/widgets/actions/runs/999'
+    );
+  });
+});
+
 test.describe('isEntrypoint', () => {
   test('matches when argv[1] resolves to this module', () => {
     const modulePath = path.join(import.meta.dirname, '..', 'dist', 'cli.js');

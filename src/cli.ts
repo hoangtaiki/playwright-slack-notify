@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { fromFailedTests, type FailedTestLike } from './adapt.js';
 import { summaryFromReport, type RawPlaywrightReport } from './report.js';
+import { detectBuildContext, mergeBuildContext } from './ci.js';
 import { notify } from './notify.js';
 import type { Transport } from './send.js';
 
@@ -147,6 +148,11 @@ export async function run(argv: string[]): Promise<number> {
     ? fromFailedTests(parsed as FailedTestLike[])
     : summaryFromReport(parsed as RawPlaywrightReport);
 
+  // Same auto-detected build link as the reporter surface - the CLI is
+  // just as often invoked directly from a CI step (see the sharding
+  // recipe), so it gets the same zero-config build link.
+  const build = mergeBuildContext(detectBuildContext(), summary.build);
+
   const transport: Transport = webhookUrl
     ? { webhookUrl, channel, username, iconEmoji }
     : token && channel
@@ -155,12 +161,16 @@ export async function run(argv: string[]): Promise<number> {
         // so URL.canParse succeeds and the payload can still be shaped.
         { webhookUrl: 'https://hooks.slack.com/services/PLACEHOLDER' };
 
-  const result = await notify(summary, transport, {
-    sendResults: always ? 'always' : 'on-failure',
-    render,
-    maxTests,
-    dryRun,
-  });
+  const result = await notify(
+    build ? { ...summary, build } : summary,
+    transport,
+    {
+      sendResults: always ? 'always' : 'on-failure',
+      render,
+      maxTests,
+      dryRun,
+    }
+  );
 
   console.log(JSON.stringify(result, null, pretty ? 2 : undefined));
   return 0;

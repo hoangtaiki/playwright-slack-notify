@@ -17,6 +17,7 @@ import type {
   TestCase,
 } from '@playwright/test/reporter';
 import type { BuildContext, RunSummary, TestOutcome } from './model.js';
+import { detectBuildContext, mergeBuildContext } from './ci.js';
 import { notify, type NotifyOptions } from './notify.js';
 import type { Transport } from './send.js';
 
@@ -160,7 +161,13 @@ export default class SlackNotifyReporter implements Reporter {
       failures,
       flakyTests,
       meta: this.options.meta,
-      build: this.options.build as BuildContext | undefined,
+      // Fills in a build link automatically under GitHub Actions or
+      // Jenkins - see ci.ts. An explicit `build` option always wins,
+      // per-field.
+      build: mergeBuildContext(
+        detectBuildContext(),
+        this.options.build as BuildContext | undefined
+      ),
     };
 
     try {
