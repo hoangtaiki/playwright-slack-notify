@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test on Node ${{ matrix.node }} and ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        node: ['20', '22', '24']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript compilation check
+        run: npm run typecheck
+
+      - name: Type-check the test suite
+        run: npm run typecheck:tests
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Build project
+        run: npm run build
+
+      # No `playwright install` step: nothing in this package or its test
+      # suite ever launches a browser. The suite does shell out to the
+      # Playwright CLI to generate its reports, which needs no browsers.
+      - name: Run tests
+        run: npx playwright test
+        env:
+          CI: true
+
+      - name: Generate coverage report
+        run: npm run coverage
+        continue-on-error: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: hoangtaiki/playwright-slack-notify
+          flags: unittests
+          name: codecov-${{ matrix.os }}-${{ matrix.node }}
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.os }}-${{ matrix.node }}
+          path: playwright-report/
+          retention-days: 7
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security audit
+        run: npm audit --omit=dev --audit-level high
+
+      - name: Check for known vulnerabilities
+        run: npx audit-ci --config .audit-ci.json
+        continue-on-error: true
+
+  package:
+    name: Package Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Pack package
+        run: npm pack
+
+      - name: Test package installation
+        run: |
+          mkdir test-install
+          cd test-install
+          npm init -y
+          npm install ../playwright-slack-notify-*.tgz
+          node --input-type=module -e "import { buildMessage, send, notify, fromFailedTests } from 'playwright-slack-notify'; for (const [n, f] of Object.entries({ buildMessage, send, notify, fromFailedTests })) { if (typeof f !== 'function') throw new Error('missing export: ' + n); } console.log('Exports OK');"
+
+      # Invoking through the bin symlink, not the real path: npm links a `bin`
+      # into node_modules/.bin, and an entrypoint check that compares
+      # import.meta.url against a raw process.argv[1] silently does nothing
+      # there and still exits 0. See src/cli.ts's isEntrypoint().
+      - name: Test the installed bin
+        run: |
+          cd test-install
+          echo '{"suites":[],"errors":[],"stats":{"startTime":"","duration":0,"expected":0,"unexpected":0,"flaky":0,"skipped":0}}' > empty-report.json
+          output=$(./node_modules/.bin/playwright-slack-notify empty-report.json --dry-run)
+          echo "$output" | grep -q '"skipped":true' || { echo "bin produced unexpected output: '$output'"; exit 1; }
+          echo "bin OK"
+
+      - name: Test the reporter export resolves
+        run: |
+          cd test-install
+          node --input-type=module -e "import Reporter from 'playwright-slack-notify/reporter'; if (typeof Reporter !== 'function') throw new Error('reporter export is not a class/function'); console.log('Reporter export OK');"
